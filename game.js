@@ -1,44 +1,38 @@
-// game.js
+// game.js – Flip Tycoon v2
 
-// ---------- GAME STATE ----------
-
-const gameState = {
-  day: 1,
-  cash: 1000,
-  inventory: [],
-  currentDeals: [],
-  marketTrends: {}, // category -> multiplier (0.7 - 1.4 range)
-  totalProfit: 0,
-  itemsSold: 0,
-  log: [],
-  nextItemId: 1,
-  nextDealId: 1
-};
+// ---------- CONSTANTS & HELPERS ----------
 
 const CATEGORIES = ["Mower", "Power Tool", "ATV/Quad", "Generator", "Truck Part"];
 
 const BASE_ITEMS = [
   { name: "Husqvarna Riding Mower", category: "Mower", baseValue: 900 },
   { name: "Craftsman Push Mower", category: "Mower", baseValue: 250 },
+  { name: "Honda HRX Mower", category: "Mower", baseValue: 650 },
   { name: "Stihl Chainsaw", category: "Power Tool", baseValue: 400 },
+  { name: "Milwaukee M18 Drill Set", category: "Power Tool", baseValue: 380 },
   { name: "DeWalt Impact Driver Set", category: "Power Tool", baseValue: 300 },
   { name: "Yamaha 350 ATV", category: "ATV/Quad", baseValue: 2200 },
   { name: "Chinese Pit Bike", category: "ATV/Quad", baseValue: 450 },
+  { name: "Polaris Sportsman 500", category: "ATV/Quad", baseValue: 3200 },
   { name: "Honda EU Generator", category: "Generator", baseValue: 1200 },
   { name: "Harbor Freight Generator", category: "Generator", baseValue: 450 },
   { name: "Diesel Injector Set", category: "Truck Part", baseValue: 900 },
-  { name: "Class 8 Truck Tires (Set)", category: "Truck Part", baseValue: 1600 }
+  { name: "Class 8 Truck Tires (Set)", category: "Truck Part", baseValue: 1600 },
+  { name: "5th Wheel Plate Assembly", category: "Truck Part", baseValue: 1300 }
 ];
 
+// Condition levels (can be repaired up toward Mint)
 const CONDITIONS = [
-  { label: "Blown Up", multiplier: 0.15 },
+  { label: "Blown Up", multiplier: 0.18 },
   { label: "Rough", multiplier: 0.35 },
   { label: "Used", multiplier: 0.6 },
   { label: "Clean", multiplier: 0.9 },
   { label: "Mint", multiplier: 1.1 }
 ];
 
-// RNG helpers
+const BASE_DAILY_EXPENSE = 25; // garage, listing fees, etc.
+const PER_ITEM_EXPENSE = 5;    // storage per unit
+
 function randBetween(min, max) {
   return Math.random() * (max - min) + min;
 }
@@ -47,11 +41,26 @@ function choice(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function clamp(val, min, max) {
-  return Math.max(min, Math.min(max, val));
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
 }
 
-// ---------- MARKET & DEAL GENERATION ----------
+// ---------- GAME STATE ----------
+
+const gameState = {
+  day: 1,
+  cash: 1000,
+  inventory: [],
+  currentDeals: [],
+  marketTrends: {}, // category -> multiplier
+  totalProfit: 0,
+  itemsSold: 0,
+  log: [],
+  nextItemId: 1,
+  nextDealId: 1
+};
+
+// ---------- MARKET & DEALS ----------
 
 function initMarketTrends() {
   CATEGORIES.forEach(cat => {
@@ -62,32 +71,31 @@ function initMarketTrends() {
 function updateMarketTrends() {
   CATEGORIES.forEach(cat => {
     const current = gameState.marketTrends[cat] ?? 1;
-    // small daily random walk
-    const change = randBetween(-0.05, 0.05);
+    const change = randBetween(-0.05, 0.05); // small daily drift
     let next = current + change;
-    next = clamp(next, 0.7, 1.4);
+    next = clamp(next, 0.7, 1.5);
     gameState.marketTrends[cat] = next;
   });
 }
 
 function generateDeal() {
   const baseItem = choice(BASE_ITEMS);
-  const cond = choice(CONDITIONS);
-  const rawMarketValue = baseItem.baseValue * cond.multiplier;
-  const marketMultiplier = gameState.marketTrends[baseItem.category] ?? 1;
-  const trueMarketValue = rawMarketValue * marketMultiplier;
+  const condIndex = Math.floor(Math.random() * CONDITIONS.length);
+  const cond = CONDITIONS[condIndex];
 
-  // Asking price: may be good, neutral, or bad
-  // 40% good (below value), 40% neutral, 20% overpriced
+  const marketMult = gameState.marketTrends[baseItem.category] ?? 1;
+  const trueMarketValue = baseItem.baseValue * cond.multiplier * marketMult;
+
+  // Asking price distribution: 40% good, 40% fair, 20% bad
   const roll = Math.random();
-  let askingMultiplier;
-  if (roll < 0.4) askingMultiplier = randBetween(0.7, 0.95);
-  else if (roll < 0.8) askingMultiplier = randBetween(0.95, 1.1);
-  else askingMultiplier = randBetween(1.1, 1.35);
+  let askingMult;
+  if (roll < 0.4) askingMult = randBetween(0.7, 0.95);
+  else if (roll < 0.8) askingMult = randBetween(0.95, 1.1);
+  else askingMult = randBetween(1.1, 1.35);
 
-  const askingPrice = Math.round(trueMarketValue * askingMultiplier);
+  const askingPrice = Math.round(trueMarketValue * askingMult);
 
-  // What the player sees as "estimated market value" (noisy)
+  // What player "thinks" market value is (noisy)
   const estNoise = randBetween(-0.18, 0.18);
   const estMarketValue = Math.round(trueMarketValue * (1 + estNoise));
 
@@ -95,16 +103,17 @@ function generateDeal() {
     id: gameState.nextDealId++,
     name: baseItem.name,
     category: baseItem.category,
-    condition: cond.label,
     baseValue: baseItem.baseValue,
+    conditionIndex: condIndex,
+    condition: cond.label,
     askingPrice,
-    estMarketValue,
-    trueMarketValue: Math.round(trueMarketValue)
+    trueMarketValue: Math.round(trueMarketValue),
+    estMarketValue
   };
 }
 
 function generateDailyDeals() {
-  const numDeals = Math.floor(randBetween(2, 4)); // 2 or 3 deals/day
+  const numDeals = Math.floor(randBetween(3, 5)); // 3–4 deals/day
   const deals = [];
   for (let i = 0; i < numDeals; i++) {
     deals.push(generateDeal());
@@ -112,11 +121,21 @@ function generateDailyDeals() {
   gameState.currentDeals = deals;
 }
 
-// ---------- INVENTORY & SALES ----------
+// ---------- INVENTORY, REPAIR & SALES ----------
+
+function repairCostForItem(item) {
+  // Flat-ish cost per step, scaled by item value
+  return Math.round(item.baseValue * 0.2);
+}
+
+function canRepairItem(item) {
+  return item.conditionIndex < CONDITIONS.length - 1;
+}
 
 function buyDeal(dealId) {
   const deal = gameState.currentDeals.find(d => d.id === dealId);
   if (!deal) return;
+
   if (gameState.cash < deal.askingPrice) {
     addLog("You don't have enough cash for that deal.");
     return;
@@ -128,73 +147,152 @@ function buyDeal(dealId) {
     id: gameState.nextItemId++,
     name: deal.name,
     category: deal.category,
+    baseValue: deal.baseValue,
+    conditionIndex: deal.conditionIndex,
     condition: deal.condition,
     buyPrice: deal.askingPrice,
     currentValue: deal.trueMarketValue,
-    baseValue: deal.baseValue,
-    daysHeld: 0
+    daysHeld: 0,
+    repairs: 0
   };
 
   gameState.inventory.push(invItem);
+
   addLog(
-    `Bought ${deal.name} (${deal.condition}) for $${deal.askingPrice}.`
+    `Bought ${invItem.name} (${invItem.condition}) for $${invItem.buyPrice}.`
   );
 
-  // Remove deal from offers
   gameState.currentDeals = gameState.currentDeals.filter(d => d.id !== dealId);
   renderAll();
 }
 
-function simulateInventoryDay() {
-  const soldToday = [];
-
+function updateInventoryForNewDay() {
   for (const item of gameState.inventory) {
     item.daysHeld += 1;
 
-    // Adjust current value based on market & condition aging
     const marketMult = gameState.marketTrends[item.category] ?? 1;
-    const agePenaltyFactor = 1 - Math.min(item.daysHeld * 0.005, 0.25); // up to -25%
-    const noise = randBetween(-0.06, 0.06);
+    const condMult = CONDITIONS[item.conditionIndex].multiplier;
 
-    const newVal =
-      item.baseValue *
-      agePenaltyFactor *
-      marketMult *
-      (item.condition === "Blown Up" ? 0.3 :
-        item.condition === "Rough" ? 0.45 :
-          item.condition === "Used" ? 0.7 :
-            item.condition === "Clean" ? 1 :
-              1.1) *
-      (1 + noise);
+    // Age penalty over time so items slowly soften in value
+    const agePenalty = 1 - Math.min(item.daysHeld * 0.004, 0.2);
+    const noise = 1 + randBetween(-0.05, 0.05);
 
+    let newVal = item.baseValue * condMult * marketMult * agePenalty * noise;
     item.currentValue = Math.max(20, Math.round(newVal));
-
-    // Chance of sale: more profit margin = easier sale
-    const margin = item.currentValue - item.buyPrice;
-    const baseChance = 0.1;
-    const marginBoost = clamp(margin / 800, -0.12, 0.35);
-    const daysBoost = clamp(item.daysHeld * 0.01, 0, 0.25);
-    const saleChance = clamp(baseChance + marginBoost + daysBoost, 0.06, 0.7);
-
-    if (Math.random() < saleChance) {
-      soldToday.push(item);
-    }
-  }
-
-  for (const sold of soldToday) {
-    sellInventoryItem(sold);
   }
 }
 
-function sellInventoryItem(item) {
-  const profit = item.currentValue - item.buyPrice;
-  gameState.cash += item.currentValue;
+function sellItemById(itemId) {
+  const item = gameState.inventory.find(i => i.id === itemId);
+  if (!item) return;
+
+  sellItem(item, null, false);
+  renderAll();
+}
+
+function sellItem(item, overridePrice = null, fromEvent = false) {
+  const salePrice = overridePrice ?? item.currentValue;
+  const profit = salePrice - item.buyPrice;
+
+  gameState.cash += salePrice;
   gameState.totalProfit += profit;
   gameState.itemsSold += 1;
+
   addLog(
-    `SOLD ${item.name} for $${item.currentValue} (bought $${item.buyPrice}, profit $${profit}).`
+    `SOLD ${item.name} for $${salePrice} (bought $${item.buyPrice}, profit $${profit})${fromEvent ? " [special buyer]" : ""
+    }.`
   );
+
   gameState.inventory = gameState.inventory.filter(i => i.id !== item.id);
+}
+
+function repairItemById(itemId) {
+  const item = gameState.inventory.find(i => i.id === itemId);
+  if (!item) return;
+
+  if (!canRepairItem(item)) {
+    addLog(`${item.name} is already in its best condition.`);
+    return;
+  }
+
+  const cost = repairCostForItem(item);
+  if (gameState.cash < cost) {
+    addLog(`Not enough cash to repair ${item.name}. Need $${cost}.`);
+    return;
+  }
+
+  gameState.cash -= cost;
+  item.conditionIndex += 1;
+  item.condition = CONDITIONS[item.conditionIndex].label;
+  item.repairs += 1;
+
+  // Refresh value immediately after repair
+  const marketMult = gameState.marketTrends[item.category] ?? 1;
+  const condMult = CONDITIONS[item.conditionIndex].multiplier;
+  item.currentValue = Math.round(item.baseValue * condMult * marketMult);
+
+  addLog(
+    `Repaired ${item.name} to ${item.condition} for $${cost}.`
+  );
+
+  renderAll();
+}
+
+// ---------- RANDOM EVENTS ----------
+
+function maybeTriggerRandomEvent() {
+  const roll = Math.random();
+  if (roll > 0.55) {
+    // ~45% of days have an event
+    return;
+  }
+
+  const eventPool = [eventHotCategory, eventTheft, eventSpecialBuyer];
+  const ev = choice(eventPool);
+  ev();
+}
+
+function eventHotCategory() {
+  const cat = choice(CATEGORIES);
+  const bump = randBetween(0.12, 0.25);
+  gameState.marketTrends[cat] = clamp(
+    (gameState.marketTrends[cat] ?? 1) + bump,
+    0.8,
+    1.7
+  );
+
+  addLog(
+    `🔥 Hot market! Demand for ${cat}s spikes (+${(bump * 100).toFixed(
+      0
+    )}% today).`
+  );
+}
+
+function eventTheft() {
+  if (gameState.inventory.length === 0) {
+    addLog("Quiet day. Nothing crazy happened.");
+    return;
+  }
+
+  const item = choice(gameState.inventory);
+  gameState.inventory = gameState.inventory.filter(i => i.id !== item.id);
+
+  addLog(
+    `💀 Bad luck – ${item.name} was stolen from your yard. You lose the item (paid $${item.buyPrice}).`
+  );
+}
+
+function eventSpecialBuyer() {
+  if (gameState.inventory.length === 0) {
+    addLog("A serious buyer called, but you had nothing to sell.");
+    return;
+  }
+
+  const item = choice(gameState.inventory);
+  const offerMult = randBetween(0.9, 1.25);
+  const offer = Math.round(item.currentValue * offerMult);
+
+  sellItem(item, offer, true);
 }
 
 // ---------- LOGGING ----------
@@ -204,8 +302,8 @@ function addLog(message) {
     day: gameState.day,
     message
   });
-  if (gameState.log.length > 80) {
-    gameState.log.length = 80;
+  if (gameState.log.length > 100) {
+    gameState.log.length = 100;
   }
 }
 
@@ -214,13 +312,24 @@ function addLog(message) {
 function nextDay() {
   gameState.day += 1;
 
-  // First, update market
+  // Expense hit
+  const expense =
+    BASE_DAILY_EXPENSE + PER_ITEM_EXPENSE * gameState.inventory.length;
+  gameState.cash -= expense;
+  addLog(`Paid $${expense} in storage/fees for the day.`);
+
+  if (gameState.cash < 0) {
+    addLog("⚠️ You're in the red. One bad streak and you're cooked.");
+  }
+
+  // Market & inventory updates
   updateMarketTrends();
+  updateInventoryForNewDay();
 
-  // Then, simulate inventory value & possible sales
-  simulateInventoryDay();
+  // Random event (hot category, theft, special buyer)
+  maybeTriggerRandomEvent();
 
-  // Generate new deals
+  // New deals for the day
   generateDailyDeals();
 
   addLog("A new day begins. Fresh deals have appeared.");
@@ -330,7 +439,9 @@ function renderDeals() {
     passBtn.textContent = "Pass";
     passBtn.classList.add("secondary");
     passBtn.onclick = () => {
-      gameState.currentDeals = gameState.currentDeals.filter(d => d.id !== deal.id);
+      gameState.currentDeals = gameState.currentDeals.filter(
+        d => d.id !== deal.id
+      );
       addLog(`You passed on ${deal.name}.`);
       renderAll();
     };
@@ -353,8 +464,9 @@ function renderInventory() {
   if (gameState.inventory.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 6;
-    td.textContent = "You don't own anything yet. Grab some deals.";
+    td.colSpan = 7;
+    td.textContent =
+      "You don't own anything yet. Grab some deals and start flipping.";
     tr.appendChild(td);
     tbody.appendChild(tr);
     return;
@@ -363,7 +475,7 @@ function renderInventory() {
   gameState.inventory.forEach(item => {
     const tr = document.createElement("tr");
 
-    tr.innerHTML = `
+    const rowHtml = `
       <td>${item.name}</td>
       <td>${item.category}</td>
       <td>${item.condition}</td>
@@ -371,7 +483,30 @@ function renderInventory() {
       <td>$${item.currentValue.toLocaleString()}</td>
       <td>${item.daysHeld}</td>
     `;
+    tr.innerHTML = rowHtml;
 
+    const actionsTd = document.createElement("td");
+    actionsTd.className = "inventory-actions";
+
+    const sellBtn = document.createElement("button");
+    sellBtn.textContent = "Sell";
+    sellBtn.onclick = () => sellItemById(item.id);
+    actionsTd.appendChild(sellBtn);
+
+    const repairBtn = document.createElement("button");
+    if (canRepairItem(item)) {
+      const cost = repairCostForItem(item);
+      repairBtn.textContent = `Repair ($${cost})`;
+      repairBtn.classList.add("secondary");
+      repairBtn.onclick = () => repairItemById(item.id);
+    } else {
+      repairBtn.textContent = "Max Cond.";
+      repairBtn.disabled = true;
+      repairBtn.classList.add("secondary");
+    }
+    actionsTd.appendChild(repairBtn);
+
+    tr.appendChild(actionsTd);
     tbody.appendChild(tr);
   });
 }
@@ -407,7 +542,6 @@ function renderStats() {
 function renderLog() {
   const ul = dom.logList;
   ul.innerHTML = "";
-
   if (gameState.log.length === 0) return;
 
   gameState.log.forEach(entry => {
@@ -431,7 +565,7 @@ function attachEvents() {
 function init() {
   cacheDom();
   attachEvents();
-  resetGame(); // also sets up market & deals
+  resetGame();
 }
 
 window.addEventListener("DOMContentLoaded", init);
