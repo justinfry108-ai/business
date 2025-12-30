@@ -10,7 +10,9 @@
   <div class="app">
     <header class="app-header">
       <h1>Flip Tycoon</h1>
-      <p class="subtitle">Buy smart. Ride the market. Don’t go broke.</p>
+      <p class="subtitle">
+        Buy smart. Repair what’s worth it. Sell at the right time. Don’t go broke.
+      </p>
       <div class="top-stats">
         <div>Day: <span id="day">1</span></div>
         <div>Cash: $<span id="cash">0</span></div>
@@ -24,6 +26,7 @@
         <p class="hint">
           Each day, new deals appear based on shifting market trends.
           Decide whether to <strong>Buy</strong> or <strong>Pass</strong>.
+          Use the inventory panel to <strong>Repair</strong> and <strong>Sell</strong> what you own.
         </p>
         <div id="deals-container" class="deals-list">
           <!-- Deals are rendered here -->
@@ -47,6 +50,7 @@
             <th>Buy $</th>
             <th>Current $</th>
             <th>Days Held</th>
+            <th>Actions</th>
           </tr>
           </thead>
           <tbody id="inventory-body">
