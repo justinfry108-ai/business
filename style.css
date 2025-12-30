@@ -57,7 +57,8 @@ body {
   border: 1px solid rgba(148, 163, 184, 0.25);
 }
 
-.panel h2, .panel h3 {
+.panel h2,
+.panel h3 {
   margin-top: 0;
 }
 
@@ -170,6 +171,21 @@ button.secondary:hover:not(:disabled) {
 
 .inventory-table tbody tr:nth-child(even) {
   background: rgba(15, 23, 42, 0.6);
+}
+
+.inventory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.inventory-actions button {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+}
+
+.inventory-actions button.secondary {
+  border-radius: 999px;
 }
 
 .market-trends {
